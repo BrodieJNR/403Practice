@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mini Geometry Dash</title>
+  <style>
+    :root{--bg0:#0b1020;--bg1:#0f1a2b;--accent:#ff6b6b;--platform:#2a3340;--player:#ffd166}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,var(--bg0),var(--bg1));color:#fff}
+    .wrap{display:flex;align-items:center;justify-content:center;height:100%;padding:20px;box-sizing:border-box}
+    .card{width:100%;max-width:900px;border-radius:14px;padding:12px;box-sizing:border-box}
+    canvas{display:block;width:100%;height:560px;border-radius:10px;background:linear-gradient(180deg,#0a1220,#061428)}
+    .hud{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+    button{background:var(--accent);border:0;padding:8px 12px;border-radius:8px;color:#081020;font-weight:700;cursor:pointer}
+    #menu{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);z-index:10}
+    #menu h1{font-size:48px;margin:0 0 20px 0}
+    #menu button{font-size:20px;padding:12px 24px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" style="position:relative">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800">Mini Geometry Dash</div>
+        <div>
+          <button id="restart">Restart</button>
+        </div>
+      </div>
+      <canvas id="game" width="900" height="560"></canvas>
+      <div class="hud">
+        <div id="distance">Distance: 0m</div>
+        <div id="status">Press Space / Click to Jump</div>
+        <div id="highscore">High Score: 0m</div>
+      </div>
+      <div id="menu">
+        <h1>Mini Geometry Dash</h1>
+        <button id="start">Start Game</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  let player, obstacles, movingPlatforms, particles, scrollSpeed, distance, running, dead;
+  let highScore = parseInt(localStorage.getItem('gd_highscore')) || 0;
+  document.getElementById('highscore').textContent = 'High Score: ' + highScore + 'm';
+
+  const GRAVITY = 0.9;
+  const JUMP_V = -20;
+  const FLOOR_Y = H - 80;
+
+  function init(){
+    player = {x:120, y:FLOOR_Y-36, size:36, vy:0, onGround:true, pulse:0, angle:0};
+    obstacles = [];
+    movingPlatforms = [];
+    particles = [];
+    scrollSpeed = 7.5;
+    distance = 0;
+    running = true;
+    dead = false;
+
+    let off = 600;
+    for(let i=0;i<50;i++){
+      const gap = 300 + Math.random()*200;
+      const type = Math.random();
+
+      if(type < 0.5){
+        const spikeCount = 1 + Math.floor(Math.random()*2);
+        for(let s=0;s<spikeCount;s++){
+          obstacles.push({type:"spike",x:off + s*40, y:FLOOR_Y-22, size:30});
+        }
+      } else if(type < 0.7){
+        obstacles.push({type:"wall",x:off,y:FLOOR_Y-80,width:40,height:80});
+      } else if(type < 0.85){
+        obstacles.push({type:"pit",x:off,y:FLOOR_Y,width:100});
+      } else {
+        movingPlatforms.push({x:off,y:FLOOR_Y-160,w:100,h:20,dir:Math.random()<0.5?1:-1});
+      }
+
+      off += gap;
+    }
+  }
+
+  function restart(){
+    init();
+    document.getElementById('status').textContent = 'Go!';
+  }
+
+  document.getElementById('restart').addEventListener('click', restart);
+  document.getElementById('start').addEventListener('click', () => {
+    document.getElementById('menu').style.display = 'none';
+    restart();
+  });
+
+  window.addEventListener('keydown', e => { if(e.code==='Space' || e.code==='ArrowUp' || e.code==='KeyW'){ e.preventDefault(); jump(); } if(e.code==='KeyR') restart(); });
+  canvas.addEventListener('mousedown', e => { jump(); });
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); jump(); }, {passive:false});
+
+  function jump(){
+    if(!running) return;
+    if(dead){ restart(); return; }
+    if(player.onGround){
+      player.vy = JUMP_V;
+      player.onGround = false;
+      player.angle += Math.PI/2; // rotate 90° on jump
+      spawnParticles(player.x, player.y+player.size/2, 10);
+    }
+  }
+
+  function spawnParticles(x,y,n){
+    for(let i=0;i<n;i++){
+      particles.push({x:x + (Math.random()-0.5)*player.size, y:y + (Math.random()-0.5)*player.size, vx:(Math.random()-0.5)*6, vy:(Math.random()-1.5)*6, life: 40 + Math.random()*30});
+    }
+  }
+
+  function update(dt){
+    if(!running) return;
+    if(dead) return;
+
+    distance += scrollSpeed * dt * 60;
+
+    // increase speed endlessly over time
+    scrollSpeed += 0.002 * dt * 60;
+
+    player.vy += GRAVITY * dt * 60;
+    player.y += player.vy * dt * 60;
+    player.pulse = (player.pulse + dt*6) % (Math.PI*2);
+
+    player.onGround = false;
+
+    let floorHere = true;
+    for(const o of obstacles){
+      if(o.type === "pit" && player.x > o.x && player.x < o.x + o.width){
+        floorHere = false;
+      }
+    }
+
+    if(floorHere && player.y + player.size/2 >= FLOOR_Y){
+      player.y = FLOOR_Y - player.size/2;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    for(const p of movingPlatforms){
+      if(player.x + player.size/2 > p.x && player.x - player.size/2 < p.x + p.w){
+        if(player.y + player.size/2 >= p.y && player.y + player.size/2 <= p.y+20 && player.vy>=0){
+          player.y = p.y - player.size/2;
+          player.vy = 0;
+          player.onGround = true;
+        }
+      }
+    }
+
+    for(const o of obstacles){
+      o.x -= scrollSpeed * dt * 60;
+      if(o.type === "spike"){
+        if(player.x + player.size/2 > o.x - o.size/2 && player.x - player.size/2 < o.x + o.size/2){
+          if(player.y + player.size/2 > o.y - o.size/2){ die(); }
+        }
+      } else if(o.type === "wall"){
+        if(player.x + player.size/2 > o.x && player.x - player.size/2 < o.x+o.width){
+          if(player.y + player.size/2 > o.y){ die(); }
+        }
+      }
+    }
+
+    for(const p of movingPlatforms){ p.x -= scrollSpeed * dt * 60; p.y += p.dir*1.5; if(p.y < FLOOR_Y-200 || p.y > FLOOR_Y-60) p.dir*=-1; }
+
+    while(obstacles.length && obstacles[0].x < -200) obstacles.shift();
+    while(movingPlatforms.length && movingPlatforms[0].x < -200) movingPlatforms.shift();
+
+    for(let i=particles.length-1;i>=0;i--){ const part = particles[i]; part.x += part.vx; part.y += part.vy; part.vy += 0.4; part.life--; if(part.life<=0) particles.splice(i,1); }
+
+    if(player.y - player.size/2 > H){ die(); }
+
+    document.getElementById('distance').textContent = 'Distance: ' + Math.floor(distance) + 'm';
+  }
+
+  function die(){
+    dead = true; running = false;
+    if(distance > highScore){
+      highScore = Math.floor(distance);
+      localStorage.setItem('gd_highscore', highScore);
+    }
+    document.getElementById('highscore').textContent = 'High Score: ' + highScore + 'm';
+    document.getElementById('status').textContent = 'You Died — Click Restart or Jump to play again';
+    spawnParticles(player.x, player.y, 30);
+    document.getElementById('menu').style.display = 'flex';
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--platform') || '#2a3340';
+    ctx.fillRect(0, FLOOR_Y, W, H-FLOOR_Y);
+
+    for(const o of obstacles){
+      if(o.type === "spike"){
+        ctx.fillStyle = '#ff6b6b';
+        ctx.beginPath();
+        ctx.moveTo(o.x - o.size/2, o.y + o.size/2);
+        ctx.lineTo(o.x, o.y - o.size/2);
+        ctx.lineTo(o.x + o.size/2, o.y + o.size/2);
+        ctx.closePath();
+        ctx.fill();
+      } else if(o.type === "wall"){
+        ctx.fillStyle = '#ff6b6b';
+        ctx.fillRect(o.x, o.y, o.width, o.height);
+      } else if(o.type === "pit"){
+        ctx.fillStyle = '#000';
+        ctx.fillRect(o.x, FLOOR_Y, o.width, H-FLOOR_Y);
+      }
+    }
+
+    ctx.fillStyle = '#44c9f0';
+    for(const p of movingPlatforms){ ctx.fillRect(p.x, p.y, p.w, p.h); }
+
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    const scale = 1 + (player.onGround ? Math.sin(player.pulse) * 0.05 : 0.05);
+    ctx.scale(scale, scale);
+
+    const grad = ctx.createLinearGradient(-player.size/2, -player.size/2, player.size/2, player.size/2);
+    grad.addColorStop(0, '#ffdd55');
+    grad.addColorStop(1, '#ff33cc');
+    ctx.fillStyle = grad;
+    ctx.fillRect(-player.size/2, -player.size/2, player.size, player.size);
+
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-player.size/2, -player.size/2, player.size, player.size);
+
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-4, -8, 8, 8);
+
+    ctx.restore();
+
+    for(const part of particles){ ctx.fillStyle = 'rgba(255,210,120,0.9)'; ctx.fillRect(part.x, part.y, 4,4); }
+
+    if(dead){ ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#fff'; ctx.font='700 34px system-ui'; ctx.fillText('You Died', W/2 - 70, H/2 - 8); }
+  }
+
+  let last = performance.now();
+  function loop(now){ const dt = Math.min(0.035, (now - last) / 1000); last = now; if(running) update(dt); draw(); requestAnimationFrame(loop); }
+
+  init();
+  loop(performance.now());
+})();
+</script>
+</body>
+</html>
